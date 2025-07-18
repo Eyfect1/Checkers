@@ -1,19 +1,33 @@
 {
+    "_WindowSize_comment": "Размер окна приложения (ширина и высота в пикселях)",
     "WindowSize": {
+        "_Width_comment": "Ширина окна",
         "Width": 0,
+        "_Height_comment": "Высота окна (исправьте 'Hight' на 'Height' при необходимости)",
         "Hight": 0
     },
+    "_Bot_comment": "Настройки ботов (ИИ)",
     "Bot": {
+        "_IsWhiteBot_comment": "true, если белыми играет бот",
         "IsWhiteBot": false,
+        "_IsBlackBot_comment": "true, если чёрными играет бот",
         "IsBlackBot": true,
+        "_WhiteBotLevel_comment": "Уровень сложности бота за белых (0 — минимальный)",
         "WhiteBotLevel": 0,
+        "_BlackBotLevel_comment": "Уровень сложности бота за чёрных (5 — максимальный)",
         "BlackBotLevel": 5,
+        "_BotScoringType_comment": "Тип оценки ходов ботом (например, только по количеству шашек или с учётом потенциала)",
         "BotScoringType": "NumberAndPotential",
+        "_BotDelayMS_comment": "Задержка между ходами бота в миллисекундах",
         "BotDelayMS": 0,
+        "_NoRandom_comment": "true — бот не делает случайных ходов, false — допускает случайность",
         "NoRandom": false,
+        "_Optimization_comment": "Уровень оптимизации бота (например, O1, O2 и т.д.)",
         "Optimization": "O1"
     },
+    "_Game_comment": "Настройки игры",
     "Game": {
+        "_MaxNumTurns_comment": "Максимальное количество ходов в партии",
         "MaxNumTurns": 120
     }
 }
