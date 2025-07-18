@@ -19,7 +19,141 @@ class Logic
         optimization = (*config)("Bot", "Optimization");
     }
 
-    // УДАЛЕНО: vector<move_pos> find_best_turns(const bool color)
+    /**
+     * Находит оптимальную последовательность ходов для бота заданного цвета.
+     * Возвращает вектор ходов, которые должен сделать бот.
+     * color: true — чёрные, false — белые
+     */
+    vector<move_pos> find_best_turns(const bool color) {
+        // Очищаем вспомогательные структуры для нового поиска
+        next_move.clear();
+        next_best_state.clear();
+        // Получаем стартовую позицию доски
+        auto board_snapshot = board->get_board();
+        // Запускаем поиск лучшего хода с начального состояния
+        int root_state = 0;
+        find_first_best_turn(board_snapshot, color, -1, -1, root_state, -1.0);
+        // Восстанавливаем цепочку ходов из найденных состояний
+        vector<move_pos> result_moves;
+        int state = 0;
+        while (state != -1 && next_move.size() > state && next_move[state].x != -1) {
+            result_moves.push_back(next_move[state]);
+            state = (next_best_state.size() > state) ? next_best_state[state] : -1;
+        }
+        return result_moves;
+    }
+
+    /**
+     * Рекурсивно ищет лучший первый ход и строит дерево вариантов.
+     * mtx — матрица доски, color — чей ход, x/y — координаты для продолжения серии взятий,
+     * state — индекс текущего состояния, alpha — текущая лучшая оценка.
+     * Возвращает оценку позиции.
+     */
+    double find_first_best_turn(const vector<vector<POS_T>>& mtx, bool color, POS_T x, POS_T y, int state, double alpha) {
+        // Добавляем новое состояние в цепочку
+        next_best_state.push_back(-1);
+        next_move.emplace_back(-1, -1, -1, -1);
+        double best_eval = -1.0;
+        // Если продолжается серия взятий — ищем ходы только для этой фигуры
+        if (state != 0) {
+            find_turns(x, y, mtx);
+        } else {
+            find_turns(color, mtx);
+        }
+        auto current_turns = turns;
+        bool beats_now = have_beats;
+        // Если нет взятий и это не первый уровень — передаём ход противнику
+        if (!beats_now && state != 0) {
+            return find_best_turns_rec(mtx, !color, 0, alpha);
+        }
+        // Перебираем все возможные ходы
+        for (const auto& mv : current_turns) {
+            int next_state = static_cast<int>(next_move.size());
+            double eval = -1.0;
+            if (beats_now) {
+                // Продолжаем серию взятий
+                eval = find_first_best_turn(apply_move(mtx, mv), color, mv.x2, mv.y2, next_state, best_eval);
+            } else {
+                // Передаём ход противнику
+                eval = find_best_turns_rec(apply_move(mtx, mv), !color, 0, best_eval);
+            }
+            // Сохраняем лучший ход
+            if (eval > best_eval) {
+                best_eval = eval;
+                next_best_state[state] = beats_now ? next_state : -1;
+                next_move[state] = mv;
+            }
+        }
+        return best_eval;
+    }
+
+    /**
+     * Рекурсивная функция поиска с alpha-beta отсечением.
+     * mtx — матрица доски, color — чей ход, depth — глубина поиска,
+     * alpha/beta — параметры отсечения, x/y — координаты для продолжения серии взятий.
+     * Возвращает оценку позиции.
+     */
+    double find_best_turns_rec(const vector<vector<POS_T>>& mtx, bool color, int depth, double alpha, double beta = INF + 1, POS_T x = -1, POS_T y = -1) {
+        // Если достигли максимальной глубины — оцениваем позицию
+        if (depth == Max_depth) {
+            return calc_score(mtx, (depth % 2 == color));
+        }
+        // Определяем возможные ходы
+        if (x != -1) {
+            find_turns(x, y, mtx);
+        } else {
+            find_turns(color, mtx);
+        }
+        auto current_turns = turns;
+        bool beats_now = have_beats;
+        // Если нет взятий и продолжается серия — передаём ход противнику
+        if (!beats_now && x != -1) {
+            return find_best_turns_rec(mtx, !color, depth + 1, alpha, beta);
+        }
+        // Если ходов нет — возвращаем крайнее значение (победа/поражение)
+        if (current_turns.empty()) {
+            return (depth % 2 ? 0 : INF);
+        }
+        double min_eval = INF + 1;
+        double max_eval = -1.0;
+        // Перебираем все возможные ходы
+        for (const auto& mv : current_turns) {
+            double eval = 0.0;
+            if (!beats_now && x == -1) {
+                // Передаём ход противнику
+                eval = find_best_turns_rec(apply_move(mtx, mv), !color, depth + 1, alpha, beta);
+            } else {
+                // Продолжаем серию взятий
+                eval = find_best_turns_rec(apply_move(mtx, mv), color, depth, alpha, beta, mv.x2, mv.y2);
+            }
+            min_eval = std::min(min_eval, eval);
+            max_eval = std::max(max_eval, eval);
+            // Alpha-beta отсечение
+            if (depth % 2) {
+                alpha = std::max(alpha, max_eval);
+            } else {
+                beta = std::min(beta, min_eval);
+            }
+            if (optimization != "O0" && alpha >= beta) {
+                return (depth % 2 ? max_eval + 1 : min_eval - 1);
+            }
+        }
+        return (depth % 2 ? max_eval : min_eval);
+    }
+
+    /**
+     * Применяет ход к копии матрицы доски и возвращает новую матрицу.
+     * Отличается от make_turn только названием для разнообразия.
+     */
+    vector<vector<POS_T>> apply_move(const vector<vector<POS_T>>& mtx, const move_pos& mv) const {
+        auto copy = mtx;
+        if (mv.xb != -1) copy[mv.xb][mv.yb] = 0;
+        if ((copy[mv.x][mv.y] == 1 && mv.x2 == 0) || (copy[mv.x][mv.y] == 2 && mv.x2 == 7))
+            copy[mv.x][mv.y] += 2;
+        copy[mv.x2][mv.y2] = copy[mv.x][mv.y];
+        copy[mv.x][mv.y] = 0;
+        return copy;
+    }
 
 private:
     // Выполняет ход turn на копии матрицы mtx и возвращает новую матрицу
