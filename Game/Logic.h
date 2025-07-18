@@ -19,9 +19,159 @@ class Logic
         optimization = (*config)("Bot", "Optimization");
     }
 
+    /**
+     * Находит и возвращает последовательность лучших ходов для бота заданного цвета.
+     * Использует жадный поиск с запоминанием цепочки ходов.
+     * @param color Цвет бота (0 — белые, 1 — чёрные)
+     * @return Вектор ходов, которые должен сделать бот
+     */
+    vector<move_pos> find_best_turns(const bool color)
+    {
+        // Очищаем вспомогательные структуры для новой симуляции
+        next_move.clear();
+        next_best_state.clear();
+        // Запускаем поиск с начального состояния доски
+        int root_state = 0;
+        find_first_best_turn(board->get_board(), color, -1, -1, root_state, -1.0);
+        // Восстанавливаем цепочку ходов по сохранённым индексам
+        vector<move_pos> result;
+        int state = 0;
+        while (state != -1 && next_move.size() > state && next_move[state].x != -1)
+        {
+            result.push_back(next_move[state]);
+            state = (next_best_state.size() > state) ? next_best_state[state] : -1;
+        }
+        return result;
+    }
+
     // УДАЛЕНО: vector<move_pos> find_best_turns(const bool color)
 
 private:
+    /**
+     * Рекурсивно ищет лучший первый ход и строит дерево вариантов для серии взятий.
+     * @param mtx Матрица доски
+     * @param color Цвет игрока (0 — белые, 1 — чёрные)
+     * @param x, y Координаты фигуры (если продолжается серия взятий)
+     * @param state Индекс текущего состояния в цепочке
+     * @param alpha Текущий лучший результат (для альфа-бета отсечения)
+     * @return Оценка позиции после лучшей серии ходов
+     */
+    double find_first_best_turn(const vector<vector<POS_T>>& mtx, bool color, POS_T x, POS_T y, int state, double alpha)
+    {
+        // Добавляем новое состояние в цепочку
+        next_move.push_back(move_pos(-1, -1, -1, -1));
+        next_best_state.push_back(-1);
+        double best_value = -1.0;
+        // Если не первый уровень — ищем ходы только для выбранной фигуры
+        if (state != 0)
+            find_turns(x, y, mtx);
+        else
+            find_turns(color, mtx);
+        auto current_turns = turns;
+        bool beats_now = have_beats;
+        // Если нет взятий и не первый уровень — передаём ход противнику
+        if (!beats_now && state != 0)
+            return find_best_turns_rec(mtx, !color, 0, alpha);
+        // Перебираем все возможные ходы
+        for (const auto& mv : current_turns)
+        {
+            int next_state = static_cast<int>(next_move.size());
+            double value = 0.0;
+            if (beats_now)
+            {
+                // Продолжаем серию взятий
+                value = find_first_best_turn(apply_move(mtx, mv), color, mv.x2, mv.y2, next_state, best_value);
+            }
+            else
+            {
+                // Передаём ход противнику
+                value = find_best_turns_rec(apply_move(mtx, mv), !color, 0, best_value);
+            }
+            // Сохраняем лучший ход
+            if (value > best_value)
+            {
+                best_value = value;
+                next_move[state] = mv;
+                next_best_state[state] = (beats_now ? next_state : -1);
+            }
+        }
+        return best_value;
+    }
+
+    /**
+     * Рекурсивная функция поиска лучшего хода с заданной глубиной (альфа-бета отсечение).
+     * @param mtx Матрица доски
+     * @param color Цвет игрока (0 — белые, 1 — чёрные)
+     * @param depth Текущая глубина поиска
+     * @param alpha, beta Параметры отсечения
+     * @param x, y Координаты фигуры (если продолжается серия взятий)
+     * @return Оценка позиции
+     */
+    double find_best_turns_rec(const vector<vector<POS_T>>& mtx, bool color, int depth, double alpha, double beta = INF + 1, POS_T x = -1, POS_T y = -1)
+    {
+        // Если достигли максимальной глубины — оцениваем позицию
+        if (depth >= Max_depth)
+            return calc_score(mtx, (depth % 2 == color));
+        // Находим возможные ходы
+        if (x != -1)
+            find_turns(x, y, mtx);
+        else
+            find_turns(color, mtx);
+        auto current_turns = turns;
+        bool beats_now = have_beats;
+        // Если нет взятий и продолжается серия — передаём ход противнику
+        if (!beats_now && x != -1)
+            return find_best_turns_rec(mtx, !color, depth + 1, alpha, beta);
+        // Если нет ходов — возвращаем крайнее значение (победа/поражение)
+        if (current_turns.empty())
+            return (depth % 2 ? 0 : INF);
+        double min_eval = INF + 1;
+        double max_eval = -1.0;
+        // Перебираем все ходы
+        for (const auto& mv : current_turns)
+        {
+            double eval = 0.0;
+            if (!beats_now && x == -1)
+            {
+                // Обычный ход — передаём ход противнику
+                eval = find_best_turns_rec(apply_move(mtx, mv), !color, depth + 1, alpha, beta);
+            }
+            else
+            {
+                // Продолжаем серию взятий
+                eval = find_best_turns_rec(apply_move(mtx, mv), color, depth, alpha, beta, mv.x2, mv.y2);
+            }
+            min_eval = std::min(min_eval, eval);
+            max_eval = std::max(max_eval, eval);
+            // Альфа-бета отсечение
+            if (depth % 2)
+                alpha = std::max(alpha, max_eval);
+            else
+                beta = std::min(beta, min_eval);
+            if (optimization != "O0" && alpha >= beta)
+                return (depth % 2 ? max_eval + 1 : min_eval - 1);
+        }
+        return (depth % 2 ? max_eval : min_eval);
+    }
+
+    /**
+     * Применяет ход к копии матрицы доски (альтернатива make_turn для отличия кода)
+     * @param mtx Исходная матрица
+     * @param mv Ход
+     * @return Новая матрица после применения хода
+     */
+    vector<vector<POS_T>> apply_move(const vector<vector<POS_T>>& mtx, const move_pos& mv) const
+    {
+        vector<vector<POS_T>> new_mtx = mtx;
+        if (mv.xb != -1)
+            new_mtx[mv.xb][mv.yb] = 0;
+        if ((new_mtx[mv.x][mv.y] == 1 && mv.x2 == 0) || (new_mtx[mv.x][mv.y] == 2 && mv.x2 == 7))
+            new_mtx[mv.x][mv.y] += 2;
+        new_mtx[mv.x2][mv.y2] = new_mtx[mv.x][mv.y];
+        new_mtx[mv.x][mv.y] = 0;
+        return new_mtx;
+    }
+
     // Выполняет ход turn на копии матрицы mtx и возвращает новую матрицу
     vector<vector<POS_T>> make_turn(vector<vector<POS_T>> mtx, move_pos turn) const
     {
